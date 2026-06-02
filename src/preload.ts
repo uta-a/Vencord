@@ -24,11 +24,48 @@ import VencordNative, { invoke, sendSync } from "./VencordNative";
 
 contextBridge.exposeInMainWorld("VencordNative", VencordNative);
 
+function installFakeMobileStatusFastConnectBlock() {
+    if (!IS_DISCORD_DESKTOP || location.protocol === "data:") return;
+
+    webFrame.executeJavaScript(`
+        (() => {
+            const marker = Symbol.for("FakeMobileStatus.fastConnectBlock");
+            if (globalThis[marker]) return;
+            globalThis[marker] = true;
+
+            const NativeWebSocket = globalThis.WebSocket;
+            if (typeof NativeWebSocket !== "function") return;
+
+            let blocked = false;
+            function shouldBlock(url) {
+                return !blocked
+                    && typeof url === "string"
+                    && url.includes("gateway.discord.gg")
+                    && url.includes("encoding=etf")
+                    && url.includes("compress=zstd-stream");
+            }
+
+            globalThis.WebSocket = new Proxy(NativeWebSocket, {
+                construct(target, args, newTarget) {
+                    if (shouldBlock(args[0])) {
+                        blocked = true;
+                        console.info("[FakeMobileStatus] Blocking Discord fast connect WebSocket", args[0]);
+                        args[0] = "ws://127.0.0.1:9";
+                    }
+
+                    return Reflect.construct(target, args, newTarget);
+                }
+            });
+        })();
+    `);
+}
+
 // Discord
 if (location.protocol !== "data:") {
     invoke(IpcEvents.INIT_FILE_WATCHERS);
 
     if (IS_DISCORD_DESKTOP) {
+        installFakeMobileStatusFastConnectBlock();
         webFrame.executeJavaScript(sendSync<string>(IpcEvents.PRELOAD_GET_RENDERER_JS));
         // Not supported in sandboxed preload scripts but Discord doesn't support it either so who cares
         require(process.env.DISCORD_PRELOAD!);

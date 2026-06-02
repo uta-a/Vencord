@@ -64,6 +64,50 @@ export function getFactoryPatchedBy(moduleId: PropertyKey, webpackRequire = wreq
 }
 
 const logger = new Logger("WebpackPatcher", "#8caaee");
+const fakeMobileStatusGatewaySendPatch = Symbol.for("FakeMobileStatus.gatewaySendPatch");
+
+function getFakeMobileStatusProperties(properties: Record<string, unknown>) {
+    return {
+        ...properties,
+        os: "Android",
+        browser: "Discord Android",
+        device: "Discord Android",
+        browser_user_agent: "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Mobile Safari/537.36",
+        browser_version: "125.0.0.0",
+        os_version: "14"
+    };
+}
+
+function installFakeMobileStatusGatewaySendPatch() {
+    const proto = WebSocket?.prototype as WebSocket["prototype"] & {
+        [fakeMobileStatusGatewaySendPatch]?: true;
+    };
+
+    if (proto == null || proto[fakeMobileStatusGatewaySendPatch]) return;
+
+    const originalSend = proto.send;
+    proto[fakeMobileStatusGatewaySendPatch] = true;
+    proto.send = function (data: string | ArrayBufferLike | Blob | ArrayBufferView) {
+        if (Settings.plugins.FakeMobileStatus?.enabled && typeof data === "string" && data.includes('"op":2')) {
+            try {
+                const payload = JSON.parse(data);
+                if (payload?.op === 2 && payload.d?.properties != null) {
+                    payload.d = {
+                        ...payload.d,
+                        properties: getFakeMobileStatusProperties(payload.d.properties)
+                    };
+
+                    console.info("[FakeMobileStatus] Gateway IDENTIFY properties", payload.d.properties);
+                    return originalSend.call(this, JSON.stringify(payload));
+                }
+            } catch { }
+        }
+
+        return originalSend.call(this, data);
+    };
+}
+
+installFakeMobileStatusGatewaySendPatch();
 
 /** Whether we tried to fallback to the WebpackRequire of the factory, or disabled patches */
 let wreqFallbackApplied = false;
@@ -509,6 +553,21 @@ function patchFactory(moduleId: PropertyKey, originalFactory: AnyModuleFactory):
     let code = "0," + (!isArrowFunction ? "function" : "") + originalFactoryCode.slice(originalFactoryCode.indexOf("("));
     let patchedSource = code;
     let patchedFactory = originalFactory;
+
+    const fakeMobileStatusPrimaryMatch = /(?<="GatewaySocket"\)\}\),properties:)([A-Za-z_$][\w$]*)/;
+    const fakeMobileStatusFallbackMatch = /(?<=properties:)([A-Za-z_$][\w$]*)(?=,presence:)/;
+    const fakeMobileStatusMatch = fakeMobileStatusPrimaryMatch.test(code)
+        ? fakeMobileStatusPrimaryMatch
+        : fakeMobileStatusFallbackMatch.test(code)
+            ? fakeMobileStatusFallbackMatch
+            : null;
+    if (code.includes("_doIdentify(){") && code.includes("GatewaySocket") && fakeMobileStatusMatch != null) {
+        code = code.replace(fakeMobileStatusMatch, '{...$1,os:"Android",browser:"Discord Android",device:"Discord Android",browser_user_agent:"Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Mobile Safari/537.36",browser_version:"125.0.0.0",os_version:"14"}');
+        patchedSource = `// Webpack Module ${String(moduleId)} - Patched by FakeMobileStatusEarly
+${code}
+//# sourceURL=file:///WebpackModule${String(moduleId)}`;
+        patchedFactory = (0, eval)(patchedSource);
+    }
 
     const patchedBy = new Set<string>();
 
