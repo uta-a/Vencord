@@ -66,9 +66,8 @@ export function getFactoryPatchedBy(moduleId: PropertyKey, webpackRequire = wreq
 const logger = new Logger("WebpackPatcher", "#8caaee");
 const fakeMobileStatusGatewaySendPatch = Symbol.for("FakeMobileStatus.gatewaySendPatch");
 
-function getFakeMobileStatusProperties(properties: Record<string, unknown>) {
+function getFakeMobileStatusProperties() {
     return {
-        ...properties,
         os: "Android",
         browser: "Discord Android",
         device: "Discord Android",
@@ -94,7 +93,7 @@ function installFakeMobileStatusGatewaySendPatch() {
                 if (payload?.op === 2 && payload.d?.properties != null) {
                     payload.d = {
                         ...payload.d,
-                        properties: getFakeMobileStatusProperties(payload.d.properties)
+                        properties: getFakeMobileStatusProperties()
                     };
 
                     console.info("[FakeMobileStatus] Gateway IDENTIFY properties", payload.d.properties);
@@ -562,7 +561,7 @@ function patchFactory(moduleId: PropertyKey, originalFactory: AnyModuleFactory):
             ? fakeMobileStatusFallbackMatch
             : null;
     if (code.includes("_doIdentify(){") && code.includes("GatewaySocket") && fakeMobileStatusMatch != null) {
-        code = code.replace(fakeMobileStatusMatch, '{...$1,os:"Android",browser:"Discord Android",device:"Discord Android",browser_user_agent:"Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Mobile Safari/537.36",browser_version:"125.0.0.0",os_version:"14"}');
+        code = code.replace(fakeMobileStatusMatch, '{os:"Android",browser:"Discord Android",device:"Discord Android",browser_user_agent:"Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Mobile Safari/537.36",browser_version:"125.0.0.0",os_version:"14"}');
         patchedSource = `// Webpack Module ${String(moduleId)} - Patched by FakeMobileStatusEarly
 ${code}
 //# sourceURL=file:///WebpackModule${String(moduleId)}`;
