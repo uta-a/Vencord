@@ -1,0 +1,67 @@
+name: Sync upstream and apply FakeMobileStatus patch
+
+on:
+    workflow_dispatch:
+    schedule:
+        - cron: "17 */6 * * *"
+
+permissions:
+    contents: write
+
+concurrency:
+    group: sync-upstream
+    cancel-in-progress: false
+
+jobs:
+    sync:
+        if: github.repository != 'Vendicated/Vencord'
+        runs-on: ubuntu-latest
+
+        steps:
+            - uses: actions/checkout@v4
+              with:
+                  fetch-depth: 0
+                  token: ${{ secrets.GITHUB_TOKEN }}
+
+            - name: Configure git
+              run: |
+                  git config user.name "github-actions[bot]"
+                  git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+            - name: Merge official Vencord
+              run: |
+                  echo "BEFORE_SYNC_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+                  git remote add upstream https://github.com/Vendicated/Vencord.git
+                  git fetch upstream main
+                  git merge --no-edit -X theirs upstream/main
+
+            - name: Apply FakeMobileStatus patch
+              run: node scripts/applyFakeMobileStatusPatch.mjs
+
+            - uses: pnpm/action-setup@v3
+
+            - name: Use Node.js 20
+              uses: actions/setup-node@v4
+              with:
+                  node-version: 20
+                  cache: "pnpm"
+
+            - name: Install dependencies
+              run: pnpm install --frozen-lockfile
+
+            - name: Verify build
+              run: pnpm build
+
+            - name: Commit and push
+              run: |
+                  if ! git diff --quiet; then
+                      git add src/preload.ts src/webpack/patchWebpack.ts
+                      git commit -m "chore: 公式Vencordを同期してFakeMobileStatus patchを再適用"
+                  fi
+
+                  if [ "$(git rev-parse HEAD)" = "$BEFORE_SYNC_SHA" ]; then
+                      echo "No changes to push."
+                      exit 0
+                  fi
+
+                  git push

@@ -87,7 +87,7 @@ function installFakeMobileStatusGatewaySendPatch() {
     const originalSend = proto.send;
     proto[fakeMobileStatusGatewaySendPatch] = true;
     proto.send = function (data: string | ArrayBufferLike | Blob | ArrayBufferView) {
-        if (Settings.plugins.FakeMobileStatus?.enabled && typeof data === "string" && data.includes('"op":2')) {
+        if (typeof data === "string" && data.includes('"op":2')) {
             try {
                 const payload = JSON.parse(data);
                 if (payload?.op === 2 && payload.d?.properties != null) {
